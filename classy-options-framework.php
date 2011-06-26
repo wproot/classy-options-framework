@@ -1,12 +1,17 @@
 <?php
 /*
-Plugin Name: Options Framework
-Plugin URI: http://www.wptheming.com
+Plugin Name: Classy Options Framework
+Plugin URI: http://wproot.com
 Description: A framework for building theme options.
-Version: 0.7.1
-Author: Devin Price
-Author URI: http://www.wptheming.com
+Version: 0.0.1
+Author: Utkarsh Kukreti
+Author URI: http://utkar.sh
 License: GPLv2
+*/
+
+/*
+Based on a fork of "Options Framework" by Devin Price
+(https://github.com/devinsays/options-framework-plugin)
 */
 
 /*
