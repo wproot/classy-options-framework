@@ -32,399 +32,466 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
 /* Basic plugin definitions */
 
-define('OPTIONS_FRAMEWORK_VERSION', '0.7');
-define('OPTIONS_FRAMEWORK_URL', plugin_dir_url( __FILE__ ));
+define('CLASSY_OPTIONS_FRAMEWORK_URL', WP_PLUGIN_URL . DIRECTORY_SEPARATOR . basename(dirname(__FILE__)) . DIRECTORY_SEPARATOR);
 
 /* Make sure we don't expose any info if called directly */
 
 if ( !function_exists( 'add_action' ) ) {
-	echo "Hi there!  I'm just a little plugin, don't mind me.";
 	exit;
 }
 
-/* If the user can't edit theme options, no use running this plugin */
+require_once dirname(__FILE__) . DIRECTORY_SEPARATOR . 'options-sanitize.php';
 
-add_action('init', 'optionsframework_rolescheck' );
+class ClassyOptions {
+	function __construct($id, $name = false) {
+		$this->id = $id;
+		$this->name = $name ? $name : $id;
+		$this->options = array();
+		$this->data = get_option($this->id);
 
-function optionsframework_rolescheck () {
-	if ( current_user_can( 'edit_theme_options' ) ) {
-		// If the user can edit theme options, let the fun begin!
-		add_action( 'admin_menu', 'optionsframework_add_page');
-		add_action( 'admin_init', 'optionsframework_init' );
-		add_action( 'admin_init', 'optionsframework_mlu_init' );
+		add_action( 'admin_init', array($this, 'admin_init') );
+		add_action( 'admin_menu', array($this, 'admin_menu') );
 	}
-}
 
-/* Register plugin activation hooks */
+	function admin_menu() {
+		$page = add_submenu_page('themes.php', $this->name, $this->name, 'edit_themes', $this->id, array( $this, 'render' ) );
 
-register_activation_hook(__FILE__,'optionsframework_activation_hook');
+		add_action( "admin_print_styles-$page", array($this, 'load_styles') );
+		add_action( "admin_print_scripts-$page",  array($this, 'load_scripts') );
 
-function optionsframework_activation_hook() {
-	register_uninstall_hook( __FILE__, 'optionsframework_delete_options' );
-}
-
-/* When uninstalled, deletes options */
-
-register_uninstall_hook( __FILE__, 'optionsframework_delete_options' );
-
-function optionsframework_delete_options() {
-
-	$optionsframework_settings = get_option('optionsframework');
-	
-	// Each theme saves its data in a seperate option, which all gets deleted
-	$knownoptions = $optionsframework_settings['knownoptions'];
-	if ($knownoptions) {
-		foreach ($knownoptions as $key) {
-			delete_option($key);
-		}
+		add_action( "wp_before_admin_bar_render", array($this, 'add_admin_bar') );
 	}
-	delete_option('optionsframework');
-}
 
-/* 
- * Creates the settings in the database by looping through the array
- * we supplied in options.php.  This is a neat way to do it since
- * we won't have to save settings for headers, descriptions, or arguments.
- *
- * Read more about the Settings API in the WordPress codex:
- * http://codex.wordpress.org/Settings_API
- *
- */
-
-function optionsframework_init() {
-
-	// Include the required files
-	require_once dirname( __FILE__ ) . '/options-sanitize.php';
-	require_once dirname( __FILE__ ) . '/options-interface.php';
-	require_once dirname( __FILE__ ) . '/options-medialibrary-uploader.php';
-	
-	// Loads the options array from the theme
-	if ( $optionsfile = locate_template( array('options.php') ) ) {
-		require_once($optionsfile);
+	function admin_init() {
+		register_setting( $this->id, $this->id, array($this, 'validate_data') );
 	}
-	else if (file_exists( dirname( __FILE__ ) . '/options.php' ) ) {
-		require_once dirname( __FILE__ ) . '/options.php';
+
+	function load_styles() {
+		wp_enqueue_style('admin-style', CLASSY_OPTIONS_FRAMEWORK_URL.'css/admin-style.css');
+		wp_enqueue_style('color-picker', CLASSY_OPTIONS_FRAMEWORK_URL.'css/colorpicker.css');
 	}
-	
-	$optionsframework_settings = get_option('optionsframework' );
-	
-	// Updates the unique option id in the database if it has changed
-	optionsframework_option_name();
-	
-	// Gets the unique id, returning a default if it isn't defined
-	if ( isset($optionsframework_settings['id']) ) {
-		$option_name = $optionsframework_settings['id'];
+
+	function load_scripts() {
+		// Inline scripts from options-interface.php
+		add_action('admin_head', array($this, 'admin_head'));
+		
+		// Enqueued scripts
+		wp_enqueue_script('jquery-ui-core');
+		wp_enqueue_script('color-picker', CLASSY_OPTIONS_FRAMEWORK_URL.'js/colorpicker.js', array('jquery'));
+		wp_enqueue_script('options-custom', CLASSY_OPTIONS_FRAMEWORK_URL.'js/options-custom.js', array('jquery'));
 	}
-	else {
-		$option_name = 'optionsframework';
+
+	function add_admin_bar() {
+		global $wp_admin_bar;
+
+		$wp_admin_bar->add_menu( array(
+			'parent' => 'appearance',
+			'id' => $this->id,
+			'title' => __( $this->name ),
+			'href' => admin_url( 'themes.php?page=' . $this->id )
+		));
 	}
-	
-	// If the option has no saved data, load the defaults
-	if ( ! get_option($option_name) ) {
-		optionsframework_setdefaults();
+
+	function admin_head() {
+		do_action( 'optionsframework_custom_scripts' );
 	}
-	
-	// Registers the settings fields and callback
-	register_setting( 'optionsframework', $option_name, 'optionsframework_validate' );
-}
 
-/* 
- * Adds default options to the database if they aren't already present.
- * May update this later to load only on plugin activation, or theme
- * activation since most people won't be editing the options.php
- * on a regular basis.
- *
- * http://codex.wordpress.org/Function_Reference/add_option
- *
- */
-
-function optionsframework_setdefaults() {
-	
-	$optionsframework_settings = get_option('optionsframework');
-
-	// Gets the unique option id
-	$option_name = $optionsframework_settings['id'];
-	
-	/* 
-	 * Each theme will hopefully have a unique id, and all of its options saved
-	 * as a separate option set.  We need to track all of these option sets so
-	 * it can be easily deleted if someone wishes to remove the plugin and
-	 * its associated data.  No need to clutter the database.  
-	 *
-	 */
-	
-	if ( isset($optionsframework_settings['knownoptions']) ) {
-		$knownoptions =  $optionsframework_settings['knownoptions'];
-		if ( !in_array($option_name, $knownoptions) ) {
-			array_push( $knownoptions, $option_name );
-			$optionsframework_settings['knownoptions'] = $knownoptions;
-			update_option('optionsframework', $optionsframework_settings);
-		}
-	} else {
-		$newoptionname = array($option_name);
-		$optionsframework_settings['knownoptions'] = $newoptionname;
-		update_option('optionsframework', $optionsframework_settings);
+	function get($key) {
+		return isset( $this->data[$key] ) ? $this->data[$key] :
+			( isset( $this->options[$key] ) ? $this->options[$key]['default'] : null );
 	}
-	
-	// Gets the default options data from the array in options.php
-	$options = optionsframework_options();
-	
-	// If the options haven't been added to the database yet, they are added now
-	$values = of_get_default_values();
-	
-	if ( isset($values) ) {
-		add_option( $option_name, $values ); // Add option with default settings
+
+	function add( $option ) {
+		$this->options[] = $option;
 	}
-}
 
-/* Add a subpage called "Theme Options" to the appearance menu. */
-
-if ( !function_exists( 'optionsframework_add_page' ) ) {
-function optionsframework_add_page() {
-
-	$of_page = add_submenu_page('themes.php', 'Theme Options', 'Theme Options', 'edit_theme_options', 'options-framework','optionsframework_page');
-	
-	// Adds actions to hook in the required css and javascript
-	add_action("admin_print_styles-$of_page",'optionsframework_load_styles');
-	add_action("admin_print_scripts-$of_page", 'optionsframework_load_scripts');
-	
-}
-}
-
-/* Loads the CSS */
-
-function optionsframework_load_styles() {
-	wp_enqueue_style('admin-style', OPTIONS_FRAMEWORK_URL.'css/admin-style.css');
-	wp_enqueue_style('color-picker', OPTIONS_FRAMEWORK_URL.'css/colorpicker.css');
-}	
-
-/* Loads the javascript */
-
-function optionsframework_load_scripts() {
-
-	// Inline scripts from options-interface.php
-	add_action('admin_head', 'of_admin_head');
-	
-	// Enqueued scripts
-	wp_enqueue_script('jquery-ui-core');
-	wp_enqueue_script('color-picker', OPTIONS_FRAMEWORK_URL.'js/colorpicker.js', array('jquery'));
-	wp_enqueue_script('options-custom', OPTIONS_FRAMEWORK_URL.'js/options-custom.js', array('jquery'));
-}
-
-function of_admin_head() {
-
-	// Hook to add custom scripts
-	do_action( 'optionsframework_custom_scripts' );
-}
-
-/* 
- * Builds out the options panel.
- *
- * If we were using the Settings API as it was likely intended we would use
- * do_settings_sections here.  But as we don't want the settings wrapped in a table,
- * we'll call our own custom optionsframework_fields.  See options-interface.php
- * for specifics on how each individual field is generated.
- *
- * Nonces are provided using the settings_fields()
- *
- */
-
-if ( !function_exists( 'optionsframework_page' ) ) {
-function optionsframework_page() {
-
-	// Get the theme name so we can display it up top
-	$themename = get_theme_data(STYLESHEETPATH . '/style.css');
-	$themename = $themename['Name'];
-	
-	settings_errors();
-	?>
-    
-	<div class="wrap">
-    <?php screen_icon( 'themes' ); ?>
+	function render() {
+		settings_errors(); ?>
+<div class="wrap">
+	<?php screen_icon( 'themes' ); ?>
 	<h2><?php esc_html_e( 'Theme Options' ); ?></h2>
-    
-    <div id="of_container">
-       <form action="options.php" method="post">
-	  <?php settings_fields('optionsframework'); ?>
 
-        <div id="header">
-          <div class="logo">
-            <h2><?php esc_html_e( $themename ); ?></h2>
-          </div>
-          <div class="clear"></div>
-        </div>
-        <div id="main">
-        <?php $return = optionsframework_fields(); ?>
-          <div id="of-nav">
-            <ul>
-              <?php echo $return[1]; ?>
-            </ul>
-          </div>
-          <div id="content">
-            <?php echo $return[0]; /* Settings */ ?>
-          </div>
-          <div class="clear"></div>
-        </div>
-        <div class="of_admin_bar">
-			<input type="submit" class="button-primary" name="update" value="<?php esc_attr_e( 'Save Options' ); ?>" />
-            <input type="submit" class="reset-button button-secondary" name="reset" value="<?php esc_attr_e( 'Restore Defaults' ); ?>" onclick="return confirm( '<?php print esc_js( __( 'Click OK to reset. Any theme settings will be lost!' ) ); ?>' );" />
-		</div>
-<div class="clear"></div>
-	</form>
-</div> <!-- / #container -->  
+	<div id="of_container">
+		<form action="options.php" method="post">
+			<?php settings_fields($this->id); ?>
+
+			<div id="header">
+				<div class="logo">
+				<h2><?php esc_html_e($this->name); ?></h2>
+				</div>
+				<div class="clear"></div>
+			</div>
+			<div id="main">
+				<?php $return = $this->fields(); ?>
+				<div id="of-nav">
+					<ul>
+						<?php echo $return[1]; ?>
+					</ul>
+				</div>
+				<div id="content">
+					<?php echo $return[0]; /* Settings */ ?>
+				</div>
+				<div class="clear"></div>
+			</div>
+			<div class="of_admin_bar">
+				<input type="submit" class="button-primary" name="update" value="<?php esc_attr_e( 'Save Options' ); ?>" />
+				<input type="submit" class="reset-button button-secondary" name="reset" value="<?php esc_attr_e( 'Restore Defaults' ); ?>" onclick="return confirm( '<?php print esc_js( __( 'Click OK to reset. Any theme settings will be lost!' ) ); ?>' );" />
+			</div>
+			<div class="clear"></div>
+		</form>
+	</div> <!-- / #of_container -->  
 </div> <!-- / .wrap -->
 
 <?php
-}
-}
-
-/** 
- * Validate Options.
- *
- * This runs after the submit/reset button has been clicked and
- * validates the inputs.
- *
- * @uses $_POST['reset']
- * @uses $_POST['update']
- */
-function optionsframework_validate( $input ) {
-
-	/*
-	 * Restore Defaults.
-	 *
-	 * In the event that the user clicked the "Restore Defaults"
-	 * button, the options defined in the theme's options.php
-	 * file will be added to the option for the active theme.
-	 */
-	 
-	if ( isset( $_POST['reset'] ) ) {
-		add_settings_error( 'options-framework', 'restore_defaults', __( 'Default options restored.', 'optionsframework' ), 'updated fade' );
-		return of_get_default_values();
 	}
+	function validate_data( $input ) {
 
-	/*
-	 * Udpdate Settings.
-	 */
-	 
-	if ( isset( $_POST['update'] ) ) {
-		$clean = array();
-		$options = optionsframework_options();
-		foreach ( $options as $option ) {
+		/*
+		 * Restore Defaults.
+		 *
+		 * In the event that the user clicked the "Restore Defaults"
+		 * button, the options defined in the theme's options.php
+		 * file will be added to the option for the active theme.
+		 */
 
-			if ( ! isset( $option['id'] ) ) {
-				continue;
-			}
+		if ( isset( $_POST['reset'] ) || ! isset( $_POST['update'] ) ) {
+			add_settings_error( $this->id, 'restore_defaults', __( 'Default options restored.', 'optionsframework' ), 'updated fade' );
+			return $this->default_data();
+		}
 
-			if ( ! isset( $option['type'] ) ) {
-				continue;
-			}
+		/*
+		 * Update Settings.
+		 */
 
-			$id = preg_replace( '/\W/', '', strtolower( $option['id'] ) );
+		if ( isset( $_POST['update'] ) ) {
+			$clean = array();
+			foreach ( $this->options as $option ) {
 
-			// Set checkbox to false if it wasn't sent in the $_POST
-			if ( 'checkbox' == $option['type'] && ! isset( $input[$id] ) ) {
-				$input[$id] = '0';
-			}
+				if ( ! isset( $option['id'] ) ) {
+					continue;
+				}
 
-			// Set each item in the multicheck to false if it wasn't sent in the $_POST
-			if ( 'multicheck' == $option['type'] && ! isset( $input[$id] ) ) {
-				foreach ( $option['options'] as $key => $value ) {
-					$input[$id][$key] = '0';
+				if ( ! isset( $option['type'] ) ) {
+					continue;
+				}
+
+				$id = preg_replace( '/\W/', '', strtolower( $option['id'] ) );
+
+				// Set checkbox to false if it wasn't sent in the $_POST
+				if ( 'checkbox' == $option['type'] && ! isset( $input[$id] ) ) {
+					$input[$id] = '0';
+				}
+
+				// Set each item in the multicheck to false if it wasn't sent in the $_POST
+				if ( 'multicheck' == $option['type'] && ! isset( $input[$id] ) ) {
+					foreach ( $option['options'] as $key => $value ) {
+						$input[$id][$key] = '0';
+					}
+				}
+
+				// For a value to be submitted to database it must pass through a sanitization filter
+				if ( has_filter( 'of_sanitize_' . $option['type'] ) ) {
+					$clean[$id] = apply_filters( 'of_sanitize_' . $option['type'], $input[$id], $option );
 				}
 			}
 
-			// For a value to be submitted to database it must pass through a sanitization filter
-			if ( has_filter( 'of_sanitize_' . $option['type'] ) ) {
-				$clean[$id] = apply_filters( 'of_sanitize_' . $option['type'], $input[$id], $option );
+			add_settings_error( $this->id, 'save_options', __( 'Options saved.', 'optionsframework' ), 'updated fade' );
+			return $clean;
+		}
+	}
+
+	function fields() {
+
+		global $allowedtags;
+
+		$option_name = $this->id;
+
+		$settings = $this->data;
+		$options = $this->options;
+
+		$counter = 0;
+		$menu = '';
+		$output = '';
+		
+		foreach ($options as $value) {
+		   
+			$counter++;
+			$val = '';
+			$select_value = '';
+			$checked = '';
+			
+			// Wrap all options
+			if ( ($value['type'] != "heading") && ($value['type'] != "info") ) {
+
+				// Keep all ids lowercase with no spaces
+				$value['id'] = preg_replace('/\W/', '', strtolower($value['id']) );
+
+				$id = 'section-' . $value['id'];
+
+				$class = 'section ';
+				if ( isset( $value['type'] ) ) {
+					$class .= ' section-' . $value['type'];
+				}
+				if ( isset( $value['class'] ) ) {
+					$class .= ' ' . $value['class'];
+				}
+
+				$output .= '<div id="' . esc_attr( $id ) .'" class="' . esc_attr( $class ) . '">'."\n";
+				$output .= '<h3 class="heading">' . esc_html( $value['name'] ) . '</h3>' . "\n";
+				$output .= '<div class="option">' . "\n" . '<div class="controls">' . "\n";
+			 }
+			
+			// Set default value to $val
+			if ( isset( $value['std']) ) {
+				$val = $value['std'];
+			}
+			
+			// If the option is already saved, ovveride $val
+			if ( ($value['type'] != 'heading') && ($value['type'] != 'info')) {
+				if ( isset($settings[($value['id'])]) ) {
+						$val = $settings[($value['id'])];
+						// Striping slashes of non-array options
+						if (!is_array($val)) {
+							$val = stripslashes($val);
+						}
+				}
+			}
+									  
+			switch ( $value['type'] ) {
+			
+			// Basic text input
+			case 'text':
+				$output .= '<input id="' . esc_attr( $value['id'] ) . '" class="of-input" name="' . esc_attr( $option_name . '[' . $value['id'] . ']' ) . '" type="text" value="' . esc_attr( $val ) . '" />';
+			break;
+			
+			// Textarea
+			case 'textarea':
+				$cols = '8';
+				$ta_value = '';
+				
+				if(isset($value['options'])){
+					$ta_options = $value['options'];
+					if(isset($ta_options['cols'])){
+						$cols = $ta_options['cols'];
+					} else { $cols = '8'; }
+				}
+				
+				$val = stripslashes( $val );
+				
+				$output .= '<textarea id="' . esc_attr( $value['id'] ) . '" class="of-input" name="' . esc_attr( $option_name . '[' . $value['id'] . ']' ) . '" cols="'. esc_attr( $cols ) . '" rows="8">' . esc_textarea( $val ) . '</textarea>';
+			break;
+			
+			// Select Box
+			case ($value['type'] == 'select'):
+				$output .= '<select class="of-input" name="' . esc_attr( $option_name . '[' . $value['id'] . ']' ) . '" id="' . esc_attr( $value['id'] ) . '">';
+				
+				foreach ($value['options'] as $key => $option ) {
+					$selected = '';
+					 if( $val != '' ) {
+						 if ( $val == $key) { $selected = ' selected="selected"';} 
+					}
+					 $output .= '<option'. $selected .' value="' . esc_attr( $key ) . '">' . esc_html( $option ) . '</option>';
+				 } 
+				 $output .= '</select>';
+			break;
+
+			
+			// Radio Box
+			case "radio":
+				$name = $option_name .'['. $value['id'] .']';
+				foreach ($value['options'] as $key => $option) {
+					$id = $option_name . '-' . $value['id'] .'-'. $key;
+					$output .= '<input class="of-input of-radio" type="radio" name="' . esc_attr( $name ) . '" id="' . esc_attr( $id ) . '" value="'. esc_attr( $key ) . '" '. checked( $val, $key, false) .' /><label for="' . esc_attr( $id ) . '">' . esc_html( $option ) . '</label><br />';
+				}
+			break;
+			
+			// Image Selectors
+			case "images":
+				$name = $option_name .'['. $value['id'] .']';
+				foreach ( $value['options'] as $key => $option ) {
+					$selected = '';
+					$checked = '';
+					if ( $val != '' ) {
+						if ( $val == $key ) {
+							$selected = ' of-radio-img-selected';
+							$checked = ' checked="checked"';
+						}
+					}
+					$output .= '<input type="radio" id="' . esc_attr( $value['id'] .'_'. $key) . '" class="of-radio-img-radio" value="' . esc_attr( $key ) . '" name="' . esc_attr( $name ) . '" '. $checked .' />';
+					$output .= '<div class="of-radio-img-label">' . esc_html( $key ) . '</div>';
+					$output .= '<img src="' . esc_url( $option ) . '" alt="' . $option .'" class="of-radio-img-img' . $selected .'" onclick="document.getElementById(\''. esc_attr($value['id'] .'_'. $key) .'\').checked=true;" />';
+				}
+			break;
+			
+			// Checkbox
+			case "checkbox":
+				$output .= '<input id="' . esc_attr( $value['id'] ) . '" class="checkbox of-input" type="checkbox" name="' . esc_attr( $option_name . '[' . $value['id'] . ']' ) . '" '. checked( $val, 1, false) .' />';
+			break;
+			
+			// Multicheck
+			case "multicheck":
+				foreach ($value['options'] as $key => $option) {
+					$checked = '';
+					$label = $option;
+					$option = preg_replace('/\W/', '', strtolower($key));
+
+					$id = $option_name . '-' . $value['id'] . '-'. $option;
+					$name = $option_name . '[' . $value['id'] . '][' . $option .']';
+
+				    if ( isset($val[$option]) ) {
+						$checked = checked($val[$option], 1, false);
+					}
+
+					$output .= '<input id="' . esc_attr( $id ) . '" class="checkbox of-input" type="checkbox" name="' . esc_attr( $name ) . '" ' . $checked . ' /><label for="' . esc_attr( $id ) . '">' . esc_html( $label ) . '</label><br />';
+				}
+			break;
+			
+			// Color picker
+			case "color":
+				$output .= '<div id="' . esc_attr( $value['id'] . '_picker' ) . '" class="colorSelector"><div style="' . esc_attr( 'background-color:' . $val ) . '"></div></div>';
+				$output .= '<input class="of-color" name="' . esc_attr( $option_name . '[' . $value['id'] . ']' ) . '" id="' . esc_attr( $value['id'] ) . '" type="text" value="' . esc_attr( $val ) . '" />';
+			break; 
+			
+			// Uploader
+			case "upload":
+				$output .= optionsframework_medialibrary_uploader( $value['id'], $val, null ); // New AJAX Uploader using Media Library	
+			break;
+			
+			// Typography
+			case 'typography':	
+			
+				$typography_stored = $val;
+				
+				// Font Size
+				$output .= '<select class="of-typography of-typography-size" name="' . esc_attr( $option_name . '[' . $value['id'] . '][size]' ) . '" id="' . esc_attr( $value['id'] . '_size' ) . '">';
+				for ($i = 9; $i < 71; $i++) { 
+					$size = $i . 'px';
+					$output .= '<option value="' . esc_attr( $size ) . '" ' . selected( $typography_stored['size'], $size, false ) . '>' . esc_html( $size ) . '</option>';
+				}
+				$output .= '</select>';
+			
+				// Font Face
+				$output .= '<select class="of-typography of-typography-face" name="' . esc_attr( $option_name . '[' . $value['id'] . '][face]' ) . '" id="' . esc_attr( $value['id'] . '_face' ) . '">';
+				
+				$faces = of_recognized_font_faces();
+				foreach ( $faces as $key => $face ) {
+					$output .= '<option value="' . esc_attr( $key ) . '" ' . selected( $typography_stored['face'], $key, false ) . '>' . esc_html( $face ) . '</option>';
+				}			
+				
+				$output .= '</select>';	
+
+				// Font Weight
+				$output .= '<select class="of-typography of-typography-style" name="'.$option_name.'['.$value['id'].'][style]" id="'. $value['id'].'_style">';
+
+				/* Font Style */
+				$styles = of_recognized_font_styles();
+				foreach ( $styles as $key => $style ) {
+					$output .= '<option value="' . esc_attr( $key ) . '" ' . selected( $typography_stored['style'], $key, false ) . '>'. $style .'</option>';
+				}
+				$output .= '</select>';
+
+				// Font Color		
+				$output .= '<div id="' . esc_attr( $value['id'] ) . '_color_picker" class="colorSelector"><div style="' . esc_attr( 'background-color:' . $typography_stored['color'] ) . '"></div></div>';
+				$output .= '<input class="of-color of-typography of-typography-color" name="' . esc_attr( $option_name . '[' . $value['id'] . '][color]' ) . '" id="' . esc_attr( $value['id'] . '_color' ) . '" type="text" value="' . esc_attr( $typography_stored['color'] ) . '" />';
+
+			break;
+			
+			// Background
+			case 'background':
+				
+				$background = $val;
+				
+				// Background Color		
+				$output .= '<div id="' . esc_attr( $value['id'] ) . '_color_picker" class="colorSelector"><div style="' . esc_attr( 'background-color:' . $background['color'] ) . '"></div></div>';
+				$output .= '<input class="of-color of-background of-background-color" name="' . esc_attr( $option_name . '[' . $value['id'] . '][color]' ) . '" id="' . esc_attr( $value['id'] . '_color' ) . '" type="text" value="' . esc_attr( $background['color'] ) . '" />';
+				
+				// Background Image - New AJAX Uploader using Media Library
+				if (!isset($background['image'])) {
+					$background['image'] = '';
+				}
+				
+				$output .= optionsframework_medialibrary_uploader( $value['id'], $background['image'], null, '',0,'image');
+				$class = 'of-background-properties';
+				if ( '' == $background['image'] ) {
+					$class .= ' hide';
+				}
+				$output .= '<div class="' . esc_attr( $class ) . '">';
+				
+				// Background Repeat
+				$output .= '<select class="of-background of-background-repeat" name="' . esc_attr( $option_name . '[' . $value['id'] . '][repeat]'  ) . '" id="' . esc_attr( $value['id'] . '_repeat' ) . '">';
+				$repeats = of_recognized_background_repeat();
+				
+				foreach ($repeats as $key => $repeat) {
+					$output .= '<option value="' . esc_attr( $key ) . '" ' . selected( $background['repeat'], $key, false ) . '>'. esc_html( $repeat ) . '</option>';
+				}
+				$output .= '</select>';
+				
+				// Background Position
+				$output .= '<select class="of-background of-background-position" name="' . esc_attr( $option_name . '[' . $value['id'] . '][position]' ) . '" id="' . esc_attr( $value['id'] . '_position' ) . '">';
+				$positions = of_recognized_background_position();
+				
+				foreach ($positions as $key=>$position) {
+					$output .= '<option value="' . esc_attr( $key ) . '" ' . selected( $background['position'], $key, false ) . '>'. esc_html( $position ) . '</option>';
+				}
+				$output .= '</select>';
+				
+				// Background Attachment
+				$output .= '<select class="of-background of-background-attachment" name="' . esc_attr( $option_name . '[' . $value['id'] . '][attachment]' ) . '" id="' . esc_attr( $value['id'] . '_attachment' ) . '">';
+				$attachments = of_recognized_background_attachment();
+				
+				foreach ($attachments as $key => $attachment) {
+					$output .= '<option value="' . esc_attr( $key ) . '" ' . selected( $background['attachment'], $key, false ) . '>' . esc_html( $attachment ) . '</option>';
+				}
+				$output .= '</select>';
+				$output .= '</div>';
+			
+			break;  
+			
+			// Info
+			case "info":
+				$class = 'section';
+				if ( isset( $value['type'] ) ) {
+					$class .= ' section-' . $value['type'];
+				}
+				if ( isset( $value['class'] ) ) {
+					$class .= ' ' . $value['class'];
+				}
+
+				$output .= '<div class="' . esc_attr( $class ) . '">' . "\n";
+				if ( isset($value['name']) ) {
+					$output .= '<h3 class="heading">' . esc_html( $value['name'] ) . '</h3>' . "\n";
+				}
+				if ( $value['desc'] ) {
+					$output .= wpautop( wp_kses( $value['desc'], $allowedtags) ) . "\n";
+				}
+				$output .= '<div class="clear"></div></div>' . "\n";
+			break;                       
+			
+			// Heading for Navigation
+			case "heading":
+				if($counter >= 2){
+				   $output .= '</div>'."\n";
+				}
+				$jquery_click_hook = preg_replace('/\W/', '', strtolower($value['name']) );
+				$jquery_click_hook = "of-option-" . $jquery_click_hook;
+				$menu .= '<li><a id="'.  esc_attr( $jquery_click_hook ) . '-tab" title="' . esc_attr( $value['name'] ) . '" href="' . esc_attr( '#'.  $jquery_click_hook ) . '">' . esc_html( $value['name'] ) . '</a></li>';
+				$output .= '<div class="group" id="' . esc_attr( $jquery_click_hook ) . '"><h2>' . esc_html( $value['name'] ) . '</h2>' . "\n";
+				break;
+			}
+
+			if ( ( $value['type'] != "heading" ) && ( $value['type'] != "info" ) ) {
+				if ( $value['type'] != "checkbox" ) {
+					$output .= '<br/>';
+				}
+				$explain_value = '';
+				if ( isset( $value['desc'] ) ) {
+					$explain_value = $value['desc'];
+				}
+				$output .= '</div><div class="explain">' . wp_kses( $explain_value, $allowedtags) . '</div>'."\n";
+				$output .= '<div class="clear"></div></div></div>'."\n";
 			}
 		}
-
-		add_settings_error( 'options-framework', 'save_options', __( 'Options saved.', 'optionsframework' ), 'updated fade' );
-		return $clean;
-	}
-
-	/*
-	 * Request Not Recognized.
-	 */
-	
-	return of_get_default_values();
-}
-
-/**
- * Format Configuration Array.
- *
- * Get an array of all default values as set in
- * options.php. The 'id','std' and 'type' keys need
- * to be defined in the configuration array. In the
- * event that these keys are not present the option
- * will not be included in this function's output.
- *
- * @return    array     Rey-keyed options configuration array.
- *
- * @access    private
- */
- 
-function of_get_default_values() {
-	$output = array();
-	$config = optionsframework_options();
-	foreach ( (array) $config as $option ) {
-		if ( ! isset( $option['id'] ) ) {
-			continue;
-		}
-		if ( ! isset( $option['std'] ) ) {
-			continue;
-		}
-		if ( ! isset( $option['type'] ) ) {
-			continue;
-		}
-		if ( has_filter( 'of_sanitize_' . $option['type'] ) ) {
-			$output[$option['id']] = apply_filters( 'of_sanitize_' . $option['type'], $option['std'], $option );
-		}
-	}
-	return $output;
-}
-
-/**
- * Add Theme Options menu item to Admin Bar.
- */
- 
-add_action( 'wp_before_admin_bar_render', 'optionsframework_adminbar' );
-
-function optionsframework_adminbar() {
-	
-	global $wp_admin_bar;
-	
-	$wp_admin_bar->add_menu( array(
-		'parent' => 'appearance',
-		'id' => 'of_theme_options',
-		'title' => __( 'Theme Options' ),
-		'href' => admin_url( 'themes.php?page=options-framework' )
-  ));
-}
-
-if ( ! function_exists( 'of_get_option' ) ) {
-
-	/**
-	 * Get Option.
-	 *
-	 * Helper function to return the theme option value.
-	 * If no value has been saved, it returns $default.
-	 * Needed because options are saved as serialized strings.
-	 */
-	 
-	function of_get_option( $name, $default = false ) {
-		$config = get_option( 'optionsframework' );
-
-		if ( ! isset( $config['id'] ) ) {
-			return $default;
-		}
-
-		$options = get_option( $config['id'] );
-
-		if ( isset( $options[$name] ) ) {
-			return $options[$name];
-		}
-
-		return $default;
+	    $output .= '</div>';
+	    return array($output,$menu);
 	}
 }
