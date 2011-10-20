@@ -451,4 +451,23 @@ class ClassyOptions {
 	    $output .= '</div>';
 	    return array($output,$menu);
 	}
+
+	function heading($text) {
+		$this->add( array( 'type' => 'heading', 'name' => $text) );
+		return $this;
+	}
+
+	function info($message) {
+		$this->add( array( 'type' => 'info', 'name' => $message ) );
+		return $this;
+	}
+	function text( $key, $label = "", $options = array() ) {
+		$this->add( array( 'id' => $key, 'type' => 'text', 'desc' => $label ) );
+		return $this;
+	}
+
+	function checkbox( $key, $label = "", $options = array() ) {
+		$this->add( array( 'id' => $key, 'type' => 'checkbox', 'desc' => $label ) );
+		return $this;
+	}
 }
