@@ -89,7 +89,7 @@
 	color: #999999;
 }
 #of_container #content .section-checkbox .explain {
-	width:540px
+	max-width: 93%;
 }
 #of_container #content .section-color .controls {
 	width:125px
@@ -125,6 +125,8 @@
 	width: 340px;
 }
 #of_container input.checkbox {
+	float: left;
+	clear: both;
 	width: 30px;
 }
 #of_container input.of-radio {
