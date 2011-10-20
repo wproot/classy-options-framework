@@ -461,7 +461,7 @@ class ClassyOptions {
 	    return array($output,$menu);
 	}
 
-	function heading($text) {
+	function section($text) {
 		$this->add( array( 'type' => 'heading', 'name' => $text) );
 		return $this;
 	}
