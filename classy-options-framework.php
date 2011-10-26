@@ -40,6 +40,7 @@ if ( !function_exists( 'add_action' ) ) {
 	exit;
 }
 
+require_once dirname(__FILE__) . DIRECTORY_SEPARATOR . 'options-medialibrary-uploader.php';
 require_once dirname(__FILE__) . DIRECTORY_SEPARATOR . 'classy-options.php';
 require_once dirname(__FILE__) . DIRECTORY_SEPARATOR . 'classy-options-sanitize.php';
 ClassyOptionsSanitize::initialize();

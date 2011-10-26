@@ -34,8 +34,10 @@ class ClassyOptions {
 		
 		// Enqueued scripts
 		wp_enqueue_script('jquery-ui-core');
+		wp_enqueue_script('thickbox');
 		wp_enqueue_script('color-picker', CLASSY_OPTIONS_FRAMEWORK_URL.'js/colorpicker.js', array('jquery'));
 		wp_enqueue_script('options-custom', CLASSY_OPTIONS_FRAMEWORK_URL.'js/options-custom.js', array('jquery'));
+		wp_enqueue_script('media-uploader', CLASSY_OPTIONS_FRAMEWORK_URL.'js/of-medialibrary-uploader.js', array('jquery'));
 	}
 
 	function add_admin_bar() {
@@ -336,7 +338,7 @@ class ClassyOptions {
 				// Font Face
 				$output .= '<select class="of-typography of-typography-face" name="' . esc_attr( $option_name . '[' . $value['id'] . '][face]' ) . '" id="' . esc_attr( $value['id'] . '_face' ) . '">';
 				
-				$faces = of_recognized_font_faces();
+				$faces = ClassyOptionsSanitize::recognized_font_faces();
 				foreach ( $faces as $key => $face ) {
 					$output .= '<option value="' . esc_attr( $key ) . '" ' . selected( $typography_stored['face'], $key, false ) . '>' . esc_html( $face ) . '</option>';
 				}			
@@ -347,7 +349,7 @@ class ClassyOptions {
 				$output .= '<select class="of-typography of-typography-style" name="'.$option_name.'['.$value['id'].'][style]" id="'. $value['id'].'_style">';
 
 				/* Font Style */
-				$styles = of_recognized_font_styles();
+				$styles = ClassyOptionsSanitize::recognized_font_styles();
 				foreach ( $styles as $key => $style ) {
 					$output .= '<option value="' . esc_attr( $key ) . '" ' . selected( $typography_stored['style'], $key, false ) . '>'. $style .'</option>';
 				}
@@ -422,7 +424,7 @@ class ClassyOptions {
 
 				$output .= '<div class="' . esc_attr( $class ) . '">' . "\n";
 				if ( isset($value['name']) ) {
-					$output .= '<h3 class="heading">' . esc_html( $value['name'] ) . '</h3>' . "\n";
+					$output .= '<h3 class="heading">' . ( $value['name'] ) . '</h3>' . "\n";
 				}
 				if ( $value['desc'] ) {
 					$output .= wpautop( wp_kses( $value['desc'], $allowedtags) ) . "\n";
@@ -470,13 +472,49 @@ class ClassyOptions {
 		$this->add( array( 'type' => 'info', 'name' => $message ) );
 		return $this;
 	}
+
 	function text( $key, $label = "", $options = array() ) {
-		$this->add( array( 'id' => $key, 'type' => 'text', 'desc' => $label ) );
+		$this->add( array( 'id' => $key, 'type' => 'text', 'name' => $label ) );
+		return $this;
+	}
+
+	function textarea( $key, $label = "", $options = array() ) {
+		$this->add( array( 'id' => $key, 'type' => 'textarea', 'name' => $label ) );
+		return $this;
+	}
+
+	function radio( $key, $label = "", $options = array() ) {
+		$this->add( array( 'id' => $key, 'type' => 'radio', 'name' => $label, 'options' => $options['options'] ) );
+		return $this;
+	}
+
+	function images( $key, $label = "", $options = array() ) {
+		$this->add( array( 'id' => $key, 'type' => 'images', 'name' => $label ) );
 		return $this;
 	}
 
 	function checkbox( $key, $label = "", $options = array() ) {
-		$this->add( array( 'id' => $key, 'type' => 'checkbox', 'desc' => $label ) );
+		$this->add( array( 'id' => $key, 'type' => 'checkbox', 'name' => $label ) );
+		return $this;
+	}
+
+	function multicheck( $key, $label = "", $options = array() ) {
+		$this->add( array( 'id' => $key, 'type' => 'multicheck', 'name' => $label ) );
+		return $this;
+	}
+
+	function color( $key, $label = "", $options = array() ) {
+		$this->add( array( 'id' => $key, 'type' => 'color', 'name' => $label ) );
+		return $this;
+	}
+
+	function upload( $key, $label = "", $options = array() ) {
+		$this->add( array( 'id' => $key, 'type' => 'upload', 'name' => $label ) );
+		return $this;
+	}
+
+	function typography( $key, $label = "", $options = array() ) {
+		$this->add( array( 'id' => $key, 'type' => 'typography', 'name' => $label ) );
 		return $this;
 	}
 }
